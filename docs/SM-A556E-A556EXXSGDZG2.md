@@ -65,6 +65,9 @@ The KASLR slide constants:
 | `SLIDE_PSELECT_WORD_SHIFT` | waiter at `E-0x1e8`, fd-set bits at `E-0x200`; futex chain `0x70+0x60+0x1b0-0x98`, pselect `0x90+0x1c0-0x50` | `3` |
 | `COMPACT_RT_MUTEX_WAITER` | compact `rt_mutex_waiter` size 88 (`0x58`) | `1` |
 | `SKB_DATA_DELTA` | `skb_shared_info` 344 bytes, order-3 page `0x1000` | `-0x1000LL` |
+| `KERNELSNITCH_FUTEX_HASH_SIZE` | `futex_init` in `kernel/futex/core.c`; the s5e8845 DT exposes 8 possible CPUs, so `roundup_pow_of_two(256 * num_possible_cpus())` = `roundup_pow_of_two(2048)` = `2048` (`0x800`) | `0x800` |
+
+For comparison, the Exynos 2400 (`e1s`/`e2s`) targets expose 10 possible CPUs, giving `roundup_pow_of_two(2560)` = `4096` (`0x1000`); the A55E hash size must *not* be copied from them.
 
 Symbol offsets, taken from the actual `vmlinux.nm` virtual addresses:
 
