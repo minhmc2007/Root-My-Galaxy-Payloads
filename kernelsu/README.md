@@ -22,6 +22,8 @@ between KMIs.
 | `ksud-e1s-S921NKSSFDZF3-kdp` | Same exact S921N build | `android14-6.1` | Device-tested late-load binary embedding the S921N no-patch-text module |
 | `android14-6.1_kernelsu-e1s-S921BXXSFDZE1-kdp.ko` | `SM-S921B`, `S921BXXSFDZE1` | `android14-6.1` | Exact E1S no-patch-text module with target `vermagic`, audited for manual relocation |
 | `ksud-e1s-S921BXXSFDZE1-kdp` | Same exact E1S build | `android14-6.1` | Device-tested late-load binary embedding the E1S no-patch-text module |
+| `android14-6.1_kernelsu-a55x-A556EXXSGDZG2-kdp.ko` | `SM-A556E`, `A556EXXSGDZG2` | `android14-6.1` | Exact A55E module with target `vermagic`, audited for manual relocation; live text patching disabled for Samsung KDP/RKP |
+| `ksud-a55x-A556EXXSGDZG2-kdp` | Same exact A55E build | `android14-6.1` | Late-load binary embedding the A55E no-patch-text module |
 | `android14-6.1_kernelsu-samsung-kdp.ko` | `SM-S721N` `S721NKSSCDZF3`; `SM-S921B` `S921BXXSFDZF2` | `android14-6.1` | Standalone Samsung KDP/RKP/DEFEX module with target `vermagic` |
 | `ksud-samsung-android14-6.1-kdp` | Same verified 6.1 targets | `android14-6.1` | Late-load binary embedding the 6.1 module |
 | `android12-5.10_kernelsu-samsung-kdp.ko` | `SM-A155N` `A155NKSS6BYH1` | `android12-5.10` | Standalone Samsung KDP/RKP/DEFEX module built against the exact A15 kernel |
@@ -50,7 +52,12 @@ KernelSU version code `32525` for manager compatibility. The A36 AYG1 pair
 uses the same fail-closed Samsung path, reports the exact A36 kernel release,
 passes the recovered-target symbol audit, and was loaded on hardware with
 KernelSU Manager reporting `Working <LKM> [Jailbreak mode]` and version
-`32525-2`. The 5.10 files are also build-verified and device-untested.
+`32525-2`. The 5.10 files are also build-verified and device-untested. The
+A55E DZG2 pair is exact-release and static-audited against the recovered
+`A556EXXSGDZG2` `vmlinux.elf`: 202 undefined imports, all present in the target
+symbol table, an empty `__versions` section, zero target CRC mismatches, and no
+`stop_machine` imports. It uses the same Samsung no-patch-text path as the
+E2S/A56/A36 builds to avoid Samsung/Exynos EL2 text-patching panics.
 
 ## Why the stock module crashes on Samsung
 
