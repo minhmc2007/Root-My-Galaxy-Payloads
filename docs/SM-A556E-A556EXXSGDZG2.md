@@ -69,6 +69,17 @@ The KASLR slide constants:
 
 For comparison, the Exynos 2400 (`e1s`/`e2s`) targets expose 10 possible CPUs, giving `roundup_pow_of_two(2560)` = `4096` (`0x1000`); the A55E hash size must *not* be copied from them.
 
+The KernelSnitch post-KASLR page search window on a55x spans the full direct
+map: `APP_KERNEL_PAGE_KSNITCH_IDENTITY_END` and
+`APP_RECLAIM_MAX_DIRECT_BASE` are `0xffffff9000000000` (= `DIRECT_MAP_END`).
+On the e1s/e2s (Exynos 2400) targets these were `0xffffff8080000000` (2 GiB);
+on the A55E the freed mm slab page is often allocated at direct-map offsets
+far above that (observed up to `0xffffff884b230000`), so the narrow window
+copied from e1s/e2s rejected valid candidates (`p0 pipe oracle ... installation
+fail`, mode-0 leak misses). The wide window matches the pre-KASLR slide leak
+range `[KERNELSNITCH_IDENTITY_START, KERNELSNITCH_IDENTITY_END]` that
+successfully finds the mm slab on this device.
+
 Symbol offsets, taken from the actual `vmlinux.nm` virtual addresses:
 
 | Macro/use | Exact derivation | Offset |
