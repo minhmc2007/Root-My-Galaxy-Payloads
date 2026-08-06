@@ -305,7 +305,11 @@ struct kernelsnitch_shared_state *kernelsnitch_setup(size_t __mm_struct_sz, size
     ks->average = AVERAGE;
 
     // unfortunately I have to use a the kernelsnitch_shared_state and mmap(shared) as find collisions and bruteforce might be in different processes!!!
+    #ifdef KERNELSNITCH_FUTEX_HASH_SIZE
+    ks->futex_hash_table_size = KERNELSNITCH_FUTEX_HASH_SIZE;
+#else
     ks->futex_hash_table_size = 256*ks->cpu_cnt;
+#endif
     ks->total_futexes = ks->futex_hash_table_size*ks->collisions*MULITPLE;
     ks->times = (volatile size_t *)SYSCHK(mmap(0, sizeof(size_t)*ks->total_futexes, PROT_WRITE|PROT_READ, MAP_ANON|MAP_SHARED, -1, 0));
     ks->tids = (pthread_t *)SYSCHK(mmap(0, sizeof(pthread_t)*ks->thread_cnt, PROT_WRITE|PROT_READ, MAP_ANON|MAP_SHARED, -1, 0));
